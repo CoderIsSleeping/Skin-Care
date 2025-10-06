@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Skin & Hair Clinic PDF Filler</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin:18px; background:#f6f7fb; color:#222; }
+    .container { max-width:1000px; margin:0 auto; display:grid; grid-template-columns: 420px 1fr; gap:20px; }
+    .card { background:white; padding:18px; border-radius:8px; box-shadow:0 4px 18px rgba(0,0,0,0.06); }
+    h2 { margin-top:0; }
+    label { display:block; margin:10px 0 6px; font-weight:600; font-size:0.95rem; }
+    input[type="text"], textarea { width:100%; padding:8px 10px; border:1px solid #dcdfe6; border-radius:6px; font-size:0.95rem; box-sizing:border-box; }
+    textarea { min-height:120px; resize:vertical; white-space:pre-wrap; }
+    .row { display:flex; gap:10px; }
+    .row > * { flex:1; }
+    button { background:#2563eb; color:white; border:0; padding:10px 14px; border-radius:8px; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:0.6; cursor:not-allowed; }
+    .preview { display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:center; }
+    canvas { border:1px solid #e6e9ef; border-radius:4px; max-width:100%; height:auto; }
+    .small { font-size:0.85rem; color:#666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>Fill Clinic Form</h2>
+
+      <label for="name">Name</label>
+      <input id="name" type="text" placeholder="Patient name" />
+
+      <div class="row">
+        <div>
+          <label for="age">Age</label>
+          <input id="age" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 34" />
+        </div>
+        <div>
+          <label for="date">Date</label>
+          <input id="date" type="text" inputmode="numeric" placeholder="DD-MM-YYYY" />
+        </div>
+      </div>
+
+      <label for="diet">Required Diet</label>
+      <textarea id="diet" placeholder="Type diet instructions..."></textarea>
+
+      <label for="medicine">Required Medicine</label>
+      <textarea id="medicine" placeholder="Type medicines..."></textarea>
+
+      <div style="margin-top:14px; display:flex; gap:10px;">
+        <button id="fillBtn">Download Filled PDF</button>
+        <button id="previewBtn" type="button">Preview PDF</button>
+      </div>
+    </div>
+
+    <div class="card preview">
+      <h2>Template Preview</h2>
+      <canvas id="pdfCanvas"></canvas>
+      <div class="small">Preview the filled PDF before downloading. Adjust fields and press Preview again to refresh.</div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+  <script>
+  (async () => {
+    const TEMPLATE_PDF = 'SKin & hair1.pdf'; // set to your actual PDF
+
+    // Box geometry (points)
+    const boxes = {
+      name:     { left:110, bottom:690, width:360, height:30,  padX:6,  padTop:9,  align:'left',  f:18, lh:18 },
+      age:  { left:110, bottom:653, width:84,  height:30, padX:6, padTop:9, align:'left', f:18, lh:20 },
+date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'left', f:18, lh:20 },
+
+      diet:     { left:25,  bottom:320, width:480, height:252, padX:10, padTop:16, align:'left',  f:18, lh:19 },
+      medicine: { left:25,  bottom:-17, width:480, height:318, padX:10, padTop:18, align:'left',  f:18, lh:18 }
+    };
+
+    // Elements
+    const nameEl = document.getElementById('name');
+    const ageEl = document.getElementById('age');
+    const dateEl = document.getElementById('date');
+    const dietEl = document.getElementById('diet');
+    const medEl = document.getElementById('medicine');
+    const fillBtn = document.getElementById('fillBtn');
+    const previewBtn = document.getElementById('previewBtn');
+    const canvas = document.getElementById('pdfCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Input restrictions: Age digits only; Date digits and hyphens, and formatted as DD-MM-YYYY
+    ageEl.addEventListener('input', () => {
+      ageEl.value = ageEl.value.replace(/\D+/g, '').slice(0, 3); // max 3 digits
+    });
+
+    dateEl.addEventListener('input', () => {
+      let v = dateEl.value.replace(/[^\d]/g, '').slice(0, 8); // digits only up to 8
+      if (v.length >= 5) v = v.replace(/^(\d{2})(\d{2})(\d{0,4}).*$/, '$1-$2-$3');
+      else if (v.length >= 3) v = v.replace(/^(\d{2})(\d{0,2}).*$/, '$1-$2');
+      dateEl.value = v;
+    });
+
+    function validDate(str) {
+      const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(str);
+      if (!m) return false;
+      const d = parseInt(m[1],10), mo = parseInt(m[2],10), y = parseInt(m[3],10);
+      if (mo < 1 || mo > 12) return false;
+      const daysInMo = new Date(y, mo, 0).getDate();
+      return d >= 1 && d <= daysInMo;
+    }
+
+    async function loadTemplate() {
+      const resp = await fetch(encodeURI(TEMPLATE_PDF));
+      if (!resp.ok) throw new Error('Cannot load template PDF: ' + resp.status);
+      return await resp.arrayBuffer();
+    }
+
+    // Draw text inside a box with wrapping and respecting manual line breaks
+    function drawTextBox(page, text, box, font, color) {
+      const size = box.f ?? 16;
+      const lineHeight = box.lh ?? Math.round(size * 1.2);
+      const padX = box.padX ?? 0;
+      const padTop = box.padTop ?? 0;
+      const maxWidth = Math.max(0, box.width - 2 * padX);
+
+      // Preserve manual line breaks from textarea
+      const paragraphs = String(text || '').replace(/\r\n/g, '\n').split('\n');
+
+      // Top baseline
+      const ascent = font.ascentAtSize ? font.ascentAtSize(size) : size * 0.8;
+      let y = box.bottom + box.height - padTop - ascent;
+      const bottomLimit = box.bottom + 4;
+
+      const pushLine = (ln) => {
+        let x = box.left + padX;
+        const lw = font.widthOfTextAtSize(ln, size);
+        if (box.align === 'center') x = box.left + (box.width - lw) / 2;
+        else if (box.align === 'right') x = box.left + box.width - padX - lw;
+        if (y < bottomLimit) return false;
+        page.drawText(ln, { x, y, size, font, color });
+        y -= lineHeight;
+        return true;
+      };
+
+      for (const para of paragraphs) {
+        // Wrap each paragraph separately to keep blank lines and breaks
+        const words = para.split(/\s+/).filter(w => w.length > 0);
+        if (words.length === 0) {
+          // Empty line
+          y -= lineHeight;
+          continue;
+        }
+        let line = '';
+        for (const w of words) {
+          const test = line ? line + ' ' + w : w;
+          const width = font.widthOfTextAtSize(test, size);
+          if (width > maxWidth && line) {
+            if (!pushLine(line)) return;
+            line = w;
+          } else {
+            line = test;
+          }
+        }
+        if (line && !pushLine(line)) return;
+      }
+    }
+
+    async function generateFilledPdfBytes(fields) {
+      const buffer = await loadTemplate();
+      const { PDFDocument, StandardFonts, rgb } = PDFLib;
+      const pdfDoc = await PDFDocument.load(buffer);
+      const page = pdfDoc.getPages()[0];
+
+      // Use regular Helvetica (not bold) to reduce heaviness
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const ink = rgb(0,0,0);
+
+      drawTextBox(page, fields.name, boxes.name, font, ink);
+      drawTextBox(page, fields.age, boxes.age, font, ink);
+      drawTextBox(page, fields.date, boxes.date, font, ink);
+      drawTextBox(page, fields.diet, boxes.diet, font, ink);
+      drawTextBox(page, fields.medicine, boxes.medicine, font, ink);
+
+      return await pdfDoc.save();
+    }
+
+    async function previewPdf() {
+      try {
+        previewBtn.disabled = true;
+        const fields = {
+          name: nameEl.value,
+          age: ageEl.value,
+          date: dateEl.value,
+          diet: dietEl.value,
+          medicine: medEl.value
+        };
+        const pdfBytes = await generateFilledPdfBytes(fields);
+        const uint8 = new Uint8Array(pdfBytes);
+        const pdfDoc = await pdfjsLib.getDocument({ data: uint8 }).promise;
+        const page = await pdfDoc.getPage(1);
+        const viewport = page.getViewport({ scale: 1.2 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      } catch (e) {
+        alert('Preview error: ' + e.message);
+        console.error(e);
+      } finally {
+        previewBtn.disabled = false;
+      }
+    }
+
+    async function downloadPdf() {
+      try {
+        // Validate numeric fields lightly before download
+        if (!/^\d{1,3}$/.test(ageEl.value)) {
+          alert('Please enter a valid numeric age.');
+          return;
+        }
+        if (!validDate(dateEl.value)) {
+          alert('Please enter a valid date in DD-MM-YYYY.');
+          return;
+        }
+
+        fillBtn.disabled = true;
+        const fields = {
+          name: nameEl.value,
+          age: ageEl.value,
+          date: dateEl.value,
+          diet: dietEl.value,
+          medicine: medEl.value
+        };
+        const pdfBytes = await generateFilledPdfBytes(fields);
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'Filled_Skin_Hair.pdf';
+        link.click();
+      } catch (e) {
+        alert('Error creating PDF: ' + e.message);
+        console.error(e);
+      } finally {
+        fillBtn.disabled = false;
+      }
+    }
+
+    fillBtn.addEventListener('click', downloadPdf);
+    previewBtn.addEventListener('click', previewPdf);
+    // Optionally, auto-preview on load:
+    // await previewPdf();
+  })();
+  </script>
+</body>
+</html>
