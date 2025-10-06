@@ -17,8 +17,22 @@
     button { background:#2563eb; color:white; border:0; padding:10px 14px; border-radius:8px; font-weight:600; cursor:pointer; }
     button:disabled { opacity:0.6; cursor:not-allowed; }
     .preview { display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:center; }
-    canvas { border:1px solid #e6e9ef; border-radius:4px; max-width:100%; height:auto; }
-    .small { font-size:0.85rem; color:#666; }
+    canvas { border:1px solid #e6e9ef; border-radius:4px; max-width:100%; height:auto; display:block; }
+
+    @media (max-width: 900px) {
+      .container {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .card {
+        width: 100%;
+        max-width: 100vw;
+      }
+      input[type="text"], textarea {
+        font-size: 1rem;
+      }
+    }
   </style>
 </head>
 <body>
@@ -64,19 +78,16 @@
 
   <script>
   (async () => {
-    const TEMPLATE_PDF = 'SKin & hair1.pdf'; // set to your actual PDF
+    const TEMPLATE_PDF = 'SKin & hair1.pdf';
 
-    // Box geometry (points)
     const boxes = {
-      name:     { left:110, bottom:690, width:360, height:30,  padX:6,  padTop:9,  align:'left',  f:18, lh:18 },
-      age:  { left:110, bottom:653, width:84,  height:30, padX:6, padTop:9, align:'left', f:18, lh:20 },
-date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'left', f:18, lh:20 },
-
-      diet:     { left:25,  bottom:320, width:480, height:252, padX:10, padTop:16, align:'left',  f:18, lh:19 },
-      medicine: { left:25,  bottom:-17, width:480, height:318, padX:10, padTop:18, align:'left',  f:18, lh:18 }
+      name:     { left:110, bottom:690, width:360, height:30,  padX:6, padTop:9, align:'left', f:18, lh:18 },
+      age:      { left:110, bottom:653, width:84,  height:30,  padX:6, padTop:9, align:'left', f:18, lh:20 },
+      date:     { left:401, bottom:650, width:160, height:30,  padX:6, padTop:9, align:'left', f:18, lh:20 },
+      diet:     { left:25,  bottom:320, width:480, height:252, padX:10, padTop:16, align:'left', f:18, lh:19 },
+      medicine: { left:25,  bottom:-17, width:480, height:318, padX:10, padTop:18, align:'left', f:18, lh:18 }
     };
 
-    // Elements
     const nameEl = document.getElementById('name');
     const ageEl = document.getElementById('age');
     const dateEl = document.getElementById('date');
@@ -87,13 +98,12 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
     const canvas = document.getElementById('pdfCanvas');
     const ctx = canvas.getContext('2d');
 
-    // Input restrictions: Age digits only; Date digits and hyphens, and formatted as DD-MM-YYYY
     ageEl.addEventListener('input', () => {
-      ageEl.value = ageEl.value.replace(/\D+/g, '').slice(0, 3); // max 3 digits
+      ageEl.value = ageEl.value.replace(/\D+/g, '').slice(0, 3);
     });
 
     dateEl.addEventListener('input', () => {
-      let v = dateEl.value.replace(/[^\d]/g, '').slice(0, 8); // digits only up to 8
+      let v = dateEl.value.replace(/[^\d]/g, '').slice(0, 8);
       if (v.length >= 5) v = v.replace(/^(\d{2})(\d{2})(\d{0,4}).*$/, '$1-$2-$3');
       else if (v.length >= 3) v = v.replace(/^(\d{2})(\d{0,2}).*$/, '$1-$2');
       dateEl.value = v;
@@ -114,7 +124,6 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
       return await resp.arrayBuffer();
     }
 
-    // Draw text inside a box with wrapping and respecting manual line breaks
     function drawTextBox(page, text, box, font, color) {
       const size = box.f ?? 16;
       const lineHeight = box.lh ?? Math.round(size * 1.2);
@@ -122,10 +131,8 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
       const padTop = box.padTop ?? 0;
       const maxWidth = Math.max(0, box.width - 2 * padX);
 
-      // Preserve manual line breaks from textarea
       const paragraphs = String(text || '').replace(/\r\n/g, '\n').split('\n');
 
-      // Top baseline
       const ascent = font.ascentAtSize ? font.ascentAtSize(size) : size * 0.8;
       let y = box.bottom + box.height - padTop - ascent;
       const bottomLimit = box.bottom + 4;
@@ -142,10 +149,8 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
       };
 
       for (const para of paragraphs) {
-        // Wrap each paragraph separately to keep blank lines and breaks
         const words = para.split(/\s+/).filter(w => w.length > 0);
         if (words.length === 0) {
-          // Empty line
           y -= lineHeight;
           continue;
         }
@@ -170,7 +175,6 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
       const pdfDoc = await PDFDocument.load(buffer);
       const page = pdfDoc.getPages()[0];
 
-      // Use regular Helvetica (not bold) to reduce heaviness
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const ink = rgb(0,0,0);
 
@@ -193,13 +197,28 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
           diet: dietEl.value,
           medicine: medEl.value
         };
+
         const pdfBytes = await generateFilledPdfBytes(fields);
         const uint8 = new Uint8Array(pdfBytes);
         const pdfDoc = await pdfjsLib.getDocument({ data: uint8 }).promise;
         const page = await pdfDoc.getPage(1);
-        const viewport = page.getViewport({ scale: 1.2 });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+
+        const unscaledVp = page.getViewport({ scale: 1 });
+        const maxW = (canvas.parentElement.offsetWidth || window.innerWidth) - 24;
+        let scale = 1.2;
+        if (unscaledVp.width > maxW) {
+          scale = maxW / unscaledVp.width;
+        }
+
+        const dpr = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({ scale: scale * dpr });
+
+        canvas.style.width = maxW + "px";
+        canvas.style.height = (viewport.height / viewport.width) * maxW + "px";
+
+        canvas.width = Math.floor(maxW * dpr);
+        canvas.height = Math.floor((viewport.height / viewport.width) * maxW * dpr);
+
         await page.render({ canvasContext: ctx, viewport }).promise;
       } catch (e) {
         alert('Preview error: ' + e.message);
@@ -211,7 +230,6 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
 
     async function downloadPdf() {
       try {
-        // Validate numeric fields lightly before download
         if (!/^\d{1,3}$/.test(ageEl.value)) {
           alert('Please enter a valid numeric age.');
           return;
@@ -245,7 +263,7 @@ date: { left:401, bottom:650, width:160, height:30, padX:6, padTop:9, align:'lef
 
     fillBtn.addEventListener('click', downloadPdf);
     previewBtn.addEventListener('click', previewPdf);
-    // Optionally, auto-preview on load:
+    // Optionally preview on load:
     // await previewPdf();
   })();
   </script>
